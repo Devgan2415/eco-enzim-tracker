@@ -1,5 +1,13 @@
+import streamlit as st
 from datetime import datetime, timedelta
 import sqlite3
+
+# Konfigurasi halaman web
+st.set_page_config(
+    page_title="Pemantauan Eco-Enzyme",
+    page_icon="🌿",
+    layout="centered"
+)
 
 # --- INISIATOR DATABASE SQLITE ---
 def init_db():
@@ -36,194 +44,181 @@ init_db()
 def get_connection():
     return sqlite3.connect("eco_enzyme.db")
 
-def menu_buat_batch():
-    print("\n--- 1. KALKULATOR & BUAT BATCH BARU ---")
-    name = input("Nama/Kode Batch (Contoh: Jeruk_01): ")
-    if not name.strip():
-        print("Nama tidak boleh kosong!")
-        return
+# --- JUDUL & NAVIGASI SIDEBAR ---
+st.title("🌿 Aplikasi Pemantauan Eco-Enzyme")
+st.markdown("Kelola pembuatan, pantau jadwal fermentasi, dan catat jurnal kesehatan Eco-Enzyme Anda dengan mudah.")
 
-    print("Pilih dasar perhitungan:")
-    print("1. Berdasarkan Berat Air (gram/ml)")
-    print("2. Berdasarkan Berat Bahan Organik (gram)")
-    choice = input("Pilihan (1/2): ")
+menu = st.sidebar.radio(
+    "Navigasi Menu",
+    [
+        "1. Buat Batch & Hitung Rasio",
+        "2. Dashboard & Jadwal Panen",
+        "3. Jurnal Gejala & Diagnosis"
+    ]
+)
 
-    if choice == '1':
-        try:
-            water = float(input("Masukkan jumlah Air (gram): "))
-        except ValueError:
-            print("Input harus angka!")
-            return
+# --- MENU 1: BUAT BATCH ---
+if menu == "1. Buat Batch & Hitung Rasio":
+    st.header("🧪 Kalkulator & Buat Batch Baru")
+    
+    name = st.text_input("Nama/Kode Batch (Contoh: Jeruk_01)")
+    calc_basis = st.radio(
+        "Pilih dasar perhitungan:",
+        ["Berdasarkan Berat Air (gram/ml)", "Berdasarkan Berat Bahan Organik (gram)"]
+    )
+    
+    if "Air" in calc_basis:
+        water = st.number_input("Masukkan jumlah Air (gram/ml):", min_value=0.0, step=100.0, value=1000.0)
         sugar = water / 10.0
         organic = sugar * 3.0
     else:
-        try:
-            organic = float(input("Masukkan jumlah Bahan Organik (gram): "))
-        except ValueError:
-            print("Input harus angka!")
-            return
+        organic = st.number_input("Masukkan jumlah Bahan Organik (gram):", min_value=0.0, step=50.0, value=300.0)
         sugar = organic / 3.0
         water = sugar * 10.0
 
     total_weight = water + organic + sugar
     start_date = datetime.today().strftime('%Y-%m-%d')
 
-    print("\nHasil Komposisi (Rasio 1:3:10):")
-    print(f"- Gula (1 bagian): {sugar:.1f} g")
-    print(f"- Bahan Organik (3 bagian): {organic:.1f} g")
-    print(f"- Air (10 bagian): {water:.1f} g")
-    print(f"- Total Berat Wadah: {total_weight:.1f} g")
-    print(f"- Tanggal Mulai: {start_date}")
+    st.markdown("---")
+    st.subheader("📊 Hasil Komposisi (Rasio 1:3:10):")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric(label="Gula (1 bagian)", value=f"{sugar:.1f} g")
+        st.metric(label="Bahan Organik (3 bagian)", value=f"{organic:.1f} g")
+    with col2:
+        st.metric(label="Air (10 bagian)", value=f"{water:.1f} g")
+        st.metric(label="Total Berat Wadah", value=f"{total_weight:.1f} g")
+    
+    st.write(f"📅 **Tanggal Mulai:** {start_date}")
 
-    save = input("Simpan ke database? (y/n): ")
-    if save.lower() == 'y':
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            INSERT INTO batches (name, start_date, water, organic, sugar, total_weight)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (name, start_date, water, organic, sugar, total_weight))
-        conn.commit()
-        conn.close()
-        print("Batch berhasil disimpan!")
+    if st.button("💾 Simpan ke Database", type="primary"):
+        if not name.strip():
+            st.error("Nama batch tidak boleh kosong!")
+        else:
+            conn = get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO batches (name, start_date, water, organic, sugar, total_weight)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (name, start_date, water, organic, sugar, total_weight))
+            conn.commit()
+            conn.close()
+            st.success("Batch berhasil disimpan ke database!")
 
-def menu_dashboard():
-    print("\n--- 2. DASHBOARD & JADWAL PANEN ---")
+# --- MENU 2: DASHBOARD ---
+elif menu == "2. Dashboard & Jadwal Panen":
+    st.header("📊 Dashboard & Jadwal Panen")
+    
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT id, name, start_date, water, organic, sugar FROM batches")
     batches = cursor.fetchall()
     
     if not batches:
-        print("Belum ada batch terdaftar.")
+        st.info("Belum ada batch terdaftar. Silakan buat batch baru di menu pertama.")
         conn.close()
-        return
+    else:
+        batch_dict = {f"ID: {b[0]} | Nama: {b[1]} (Mulai: {b[2]})": b[0] for b in batches}
+        selected_label = st.selectbox("Pilih Batch yang ingin dipantau:", list(batch_dict.keys()))
+        b_id = batch_dict[selected_label]
 
-    print("Daftar Batch:")
-    for b in batches:
-        print(f"ID: {b[0]} | Nama: {b[1]} | Mulai: {b[2]}")
-
-    try:
-        b_id = int(input("Masukkan ID Batch yang ingin dipantau: "))
-    except ValueError:
-        print("ID harus angka!")
+        cursor.execute("SELECT name, start_date, water, organic, sugar, total_weight FROM batches WHERE id = ?", (b_id,))
+        selected = cursor.fetchone()
         conn.close()
-        return
 
-    cursor.execute("SELECT name, start_date, water, organic, sugar FROM batches WHERE id = ?", (b_id,))
-    selected = cursor.fetchone()
-    conn.close()
+        if selected:
+            name, start_str, water, organic, sugar, total_weight = selected
+            start_date = datetime.strptime(start_str, '%Y-%m-%d')
+            today = datetime.today()
+            days_elapsed = (today - start_date).days
 
-    if not selected:
-        print("Batch tidak ditemukan.")
-        return
+            st.markdown(f"### Status Batch: `{name}`")
+            st.metric(label="Usia Fermentasi", value=f"{days_elapsed} Hari")
 
-    name, start_str, water, organic, sugar = selected
-    start_date = datetime.strptime(start_str, '%Y-%m-%d')
-    today = datetime.today()
-    days_elapsed = (today - start_date).days
+            # Peringatan Fase Gas
+            if days_elapsed <= 14:
+                st.warning("🚨 **[Fase Pelepasan Gas]:** Buka tutup wadah sedikit setiap 1-2 hari sekali agar gas keluar dan wadah tidak meledak!")
+            else:
+                st.success("✅ Fase pelepasan gas intensif terlewati.")
 
-    print(f"\nStatus Batch: {name}")
-    print(f"Usia Fermentasi: {days_elapsed} Hari")
+            # Peringatan Batas Penambahan
+            if 25 <= days_elapsed <= 35:
+                st.info("⚠️ **[Batas Penambahan]:** Ini batas akhir penambahan bahan organik atau gula jika dirasa kurang.")
 
-    if days_elapsed <= 14:
-        print("🚨 [Fase Pelepasan Gas]: Buka tutup wadah sedikit setiap 1-2 hari sekali agar tidak meledak!")
-    else:
-        print("✅ Fase pelepasan gas intensif terlewati.")
+            # Jadwal Panen
+            harvest_date = start_date + timedelta(days=90)
+            days_to_harvest = (harvest_date - today).days
+            
+            st.markdown("---")
+            if days_to_harvest > 0:
+                st.info(f"⏳ **Perkiraan Panen:** {harvest_date.strftime('%Y-%m-%d')} (Kurang **{days_to_harvest} hari** lagi)")
+            else:
+                st.balloons()
+                st.success("🎉 **Waktunya Panen!** Fermentasi sudah mencapai 3 bulan.")
 
-    if 25 <= days_elapsed <= 35:
-        print("⚠️ [Batas Penambahan]: Ini batas akhir penambahan bahan/gula jika kurang.")
-
-    harvest_date = start_date + timedelta(days=90)
-    days_to_harvest = (harvest_date - today).days
-    if days_to_harvest > 0:
-        print(f"⏳ Perkiraan Panen: {harvest_date.strftime('%Y-%m-%d')} (Kurang {days_to_harvest} hari lagi)")
-    else:
-        print("🎉 Waktunya Panen! Sudah mencapai 3 bulan.")
-
-def menu_jurnal():
-    print("\n--- 3. JURNAL GEJALA & DIAGNOSIS ---")
+# --- MENU 3: JURNAL GEJALA ---
+elif menu == "3. Jurnal Gejala & Diagnosis":
+    st.header("📝 Jurnal Gejala & Diagnosis")
+    
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT id, name FROM batches")
     batches = cursor.fetchall()
 
     if not batches:
-        print("Belum ada batch.")
+        st.info("Belum ada batch terdaftar.")
         conn.close()
-        return
-
-    for b in batches:
-        print(f"ID: {b[0]} | Nama: {b[1]}")
-
-    try:
-        b_id = int(input("Pilih ID Batch: "))
-    except ValueError:
-        print("ID harus angka.")
-        conn.close()
-        return
-
-    try:
-        week_no = int(input("Minggu ke-: "))
-    except ValueError:
-        print("Minggu harus angka.")
-        conn.close()
-        return
-
-    print("\nPilih Gejala/Kondisi Permukaan:")
-    print("1. Muncul lapisan putih / jamur putih")
-    print("2. Muncul jamur hitam, ulat, atau bau got/busuk")
-    print("3. Muncul lapisan seperti jeli (Mama Enzyme)")
-    choice = input("Pilihan (1/2/3): ")
-
-    diagnosis, solution = "", ""
-    if choice == '1':
-        diagnosis = "Normal / Berhasil (Jamur pitera/ragi yang baik)."
-        solution = "Biarkan saja atau aduk perlahan."
-    elif choice == '2':
-        diagnosis = "Kontaminasi / Gagal Fermentasi."
-        solution = "Tambahkan gula sejumlah takaran awal, tutup rapat, jemur di bawah matahari 3 hari."
-    elif choice == '3':
-        diagnosis = "Sangat Berhasil (Struktur selulosa kaya manfaat)."
-        solution = "Pertahankan penyimpanan, lapisan jeli bisa dipanen terpisah."
     else:
-        print("Pilihan tidak valid.")
+        batch_dict = {f"ID: {b[0]} | Nama: {b[1]}": b[0] for b in batches}
+        selected_label = st.selectbox("Pilih ID Batch:", list(batch_dict.keys()))
+        b_id = batch_dict[selected_label]
+
+        week_no = st.number_input("Minggu ke-:", min_value=1, max_value=20, value=1, step=1)
+
+        choice = st.selectbox(
+            "Pilih Gejala/Kondisi Permukaan:",
+            [
+                "1. Muncul lapisan putih / jamur putih",
+                "2. Muncul jamur hitam, ulat, atau bau got/busuk",
+                "3. Muncul lapisan seperti jeli (Mama Enzyme)"
+            ]
+        )
+
+        diagnosis, solution = "", ""
+        if "1." in choice:
+            diagnosis = "Normal / Berhasil (Jamur pitera/ragi yang baik)."
+            solution = "Biarkan saja atau aduk perlahan."
+        elif "2." in choice:
+            diagnosis = "Kontaminasi / Gagal Fermentasi."
+            solution = "Tambahkan gula sejumlah takaran awal, tutup rapat, jemur di bawah matahari selama 3 hari."
+        elif "3." in choice:
+            diagnosis = "Sangat Berhasil (Struktur selulosa kaya manfaat)."
+            solution = "Pertahankan penyimpanan, lapisan jeli (Mama Enzyme) bisa dipanen terpisah."
+
+        st.markdown("---")
+        st.markdown(f"**🔍 Diagnosis:** {diagnosis}")
+        st.markdown(f"**💡 Solusi:** {solution}")
+
+        if st.button("Simpan ke Jurnal"):
+            cursor.execute("""
+                INSERT INTO journals (batch_id, week_number, log_date, symptom, diagnosis, solution)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (b_id, week_no, datetime.today().strftime('%Y-%m-%d'), choice, diagnosis, solution))
+            conn.commit()
+            st.success("Jurnal berhasil disimpan!")
+
+        # Tampilkan Riwayat Jurnal
+        st.markdown("---")
+        st.subheader("📖 Riwayat Jurnal Batch Ini")
+        cursor.execute("SELECT week_number, log_date, symptom, diagnosis, solution FROM journals WHERE batch_id = ?", (b_id,))
+        journals = cursor.fetchall()
         conn.close()
-        return
 
-    print(f"\nDiagnosis: {diagnosis}")
-    print(f"Solusi: {solution}")
-
-    save = input("Simpan ke jurnal? (y/n): ")
-    if save.lower() == 'y':
-        cursor.execute("""
-            INSERT INTO journals (batch_id, week_number, log_date, symptom, diagnosis, solution)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (b_id, week_no, datetime.today().strftime('%Y-%m-%d'), f"Gejala Pilihan {choice}", diagnosis, solution))
-        conn.commit()
-        print("Jurnal berhasil disimpan!")
-    conn.close()
-
-def main():
-    while True:
-        print("\n=== APLIKASI PEMANTAUAN ECO-ENZYME ===")
-        print("1. Buat Batch & Hitung Rasio")
-        print("2. Dashboard & Jadwal Panen")
-        print("3. Jurnal Gejala & Diagnosis")
-        print("4. Keluar")
-        
-        opt = input("Pilih menu (1-4): ")
-        if opt == '1':
-            menu_buat_batch()
-        elif opt == '2':
-            menu_dashboard()
-        elif opt == '3':
-            menu_jurnal()
-        elif opt == '4':
-            print("Keluar dari program.")
-            break
+        if journals:
+            for j in journals:
+                with st.expander(f"Minggu ke-{j[0]} (Tanggal: {j[1]})"):
+                    st.write(f"**Gejala:** {j[2]}")
+                    st.write(f"**Diagnosis:** {j[3]}")
+                    st.write(f"**Solusi:** {j[4]}")
         else:
-            print("Pilihan tidak valid.")
-
-if __name__ == "__main__":
-    main()
+            st.write("Belum ada catatan jurnal untuk batch ini.")
