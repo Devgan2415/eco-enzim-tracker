@@ -13,6 +13,8 @@ st.set_page_config(
 def init_db():
     conn = sqlite3.connect("eco_enzyme.db")
     cursor = conn.cursor()
+    
+    # 1. Buat tabel batches jika belum ada sama sekali
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS batches (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -25,6 +27,14 @@ def init_db():
             total_weight REAL NOT NULL
         )
     """)
+    
+    # 2. Cek apakah kolom 'username' sudah ada di tabel batches (untuk migrasi data lama)
+    cursor.execute("PRAGMA table_info(batches)")
+    columns = [info[1] for info in cursor.fetchall()]
+    if "username" not in columns:
+        cursor.execute("ALTER TABLE batches ADD COLUMN username TEXT NOT NULL DEFAULT 'DefaultUser'")
+
+    # 3. Buat tabel journals jika belum ada
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS journals (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
