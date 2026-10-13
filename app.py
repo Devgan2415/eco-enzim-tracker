@@ -16,6 +16,7 @@ def init_db():
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS batches (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
             name TEXT NOT NULL,
             start_date TEXT NOT NULL,
             water REAL NOT NULL,
@@ -44,9 +45,32 @@ init_db()
 def get_connection():
     return sqlite3.connect("eco_enzyme.db")
 
-# --- JUDUL & NAVIGASI SIDEBAR ---
+# --- SISTEM LOGIN SEDERHANA ---
+if "username" not in st.session_state:
+    st.session_state["username"] = ""
+
+st.sidebar.title("🔐 Akun Pengguna")
+if not st.session_state["username"]:
+    st.sidebar.info("Silakan masukkan nama/username Anda untuk mulai menggunakan aplikasi secara pribadi.")
+    username_input = st.sidebar.text_input("Username / Nama Anda:")
+    if st.sidebar.button("Masuk / Login", type="primary"):
+        if username_input.strip():
+            st.session_state["username"] = username_input.strip()
+            st.rerun()
+        else:
+            st.sidebar.error("Username tidak boleh kosong!")
+    st.stop() # Hentikan render halaman jika belum login
+else:
+    st.sidebar.success(f"Login sebagai: **{st.session_state['username']}**")
+    if st.sidebar.button("Logout / Keluar"):
+        st.session_state["username"] = ""
+        st.rerun()
+
+current_user = st.session_state["username"]
+
+# --- JUDUL & NAVIGASI APLIKASI ---
 st.title("🌿 Aplikasi Pemantauan Eco-Enzyme")
-st.markdown("Kelola pembuatan, pantau jadwal fermentasi, dan catat jurnal kesehatan Eco-Enzyme Anda dengan mudah.")
+st.markdown(f"Halo, **{current_user}**! Kelola pembuatan, pantau jadwal fermentasi, dan catat jurnal kesehatan Eco-Enzyme Anda di sini.")
 
 menu = st.sidebar.radio(
     "Navigasi Menu",
@@ -64,17 +88,19 @@ if menu == "1. Buat Batch & Hitung Rasio":
     name = st.text_input("Nama/Kode Batch (Contoh: Jeruk_01)")
     calc_basis = st.radio(
         "Pilih dasar perhitungan:",
-        ["Berdasarkan Berat Air (gram/ml)", "Berdasarkan Berat Bahan Organik (gram)"]
+        ["Berdasarkan Volume Air (Liter)", "Berdasarkan Berat Bahan Organik (gram)"]
     )
     
     if "Air" in calc_basis:
-        water = st.number_input("Masukkan jumlah Air (gram/ml):", min_value=0.0, step=100.0, value=1000.0)
+        water_liter = st.number_input("Masukkan jumlah Air (Liter):", min_value=0.1, step=0.5, value=1.0)
+        water = water_liter * 1000.0  # 1 Liter air = 1000 gram
         sugar = water / 10.0
         organic = sugar * 3.0
     else:
         organic = st.number_input("Masukkan jumlah Bahan Organik (gram):", min_value=0.0, step=50.0, value=300.0)
         sugar = organic / 3.0
         water = sugar * 10.0
+        water_liter = water / 1000.0
 
     total_weight = water + organic + sugar
     start_date = datetime.today().strftime('%Y-%m-%d')
@@ -86,24 +112,24 @@ if menu == "1. Buat Batch & Hitung Rasio":
         st.metric(label="Gula (1 bagian)", value=f"{sugar:.1f} g")
         st.metric(label="Bahan Organik (3 bagian)", value=f"{organic:.1f} g")
     with col2:
-        st.metric(label="Air (10 bagian)", value=f"{water:.1f} g")
-        st.metric(label="Total Berat Wadah", value=f"{total_weight:.1f} g")
+        st.metric(label="Air (10 bagian)", value=f"{water_liter:.1f} Liter ({water:.0f} g)")
+        st.metric(label="Total Berat Campuran", value=f"{total_weight:.1f} g")
     
     st.write(f"📅 **Tanggal Mulai:** {start_date}")
 
-    if st.button("💾 Simpan ke Database", type="primary"):
+    if st.button("💾 Simpan ke Database Saya", type="primary"):
         if not name.strip():
             st.error("Nama batch tidak boleh kosong!")
         else:
             conn = get_connection()
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO batches (name, start_date, water, organic, sugar, total_weight)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (name, start_date, water, organic, sugar, total_weight))
+                INSERT INTO batches (username, name, start_date, water, organic, sugar, total_weight)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (current_user, name, start_date, water, organic, sugar, total_weight))
             conn.commit()
             conn.close()
-            st.success("Batch berhasil disimpan ke database!")
+            st.success(f"Batch '{name}' berhasil disimpan untuk akun {current_user}!")
 
 # --- MENU 2: DASHBOARD ---
 elif menu == "2. Dashboard & Jadwal Panen":
@@ -111,11 +137,12 @@ elif menu == "2. Dashboard & Jadwal Panen":
     
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, name, start_date, water, organic, sugar FROM batches")
+    # Hanya ambil batch milik user yang sedang login
+    cursor.execute("SELECT id, name, start_date, water, organic, sugar FROM batches WHERE username = ?", (current_user,))
     batches = cursor.fetchall()
     
     if not batches:
-        st.info("Belum ada batch terdaftar. Silakan buat batch baru di menu pertama.")
+        st.info("Belum ada batch terdaftar untuk akun Anda. Silakan buat batch baru di menu pertama.")
         conn.close()
     else:
         batch_dict = {f"ID: {b[0]} | Nama: {b[1]} (Mulai: {b[2]})": b[0] for b in batches}
@@ -162,11 +189,12 @@ elif menu == "3. Jurnal Gejala & Diagnosis":
     
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, name FROM batches")
+    # Hanya ambil batch milik user yang sedang login
+    cursor.execute("SELECT id, name FROM batches WHERE username = ?", (current_user,))
     batches = cursor.fetchall()
 
     if not batches:
-        st.info("Belum ada batch terdaftar.")
+        st.info("Belum ada batch terdaftar untuk akun Anda.")
         conn.close()
     else:
         batch_dict = {f"ID: {b[0]} | Nama: {b[1]}": b[0] for b in batches}
